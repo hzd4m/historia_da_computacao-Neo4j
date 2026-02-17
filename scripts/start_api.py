@@ -73,6 +73,36 @@ class SearchResponse(BaseModel):
     lineage: List[str]
 
 
+class GraphNode(BaseModel):
+    id: str
+    uid: str | None = None
+    nome: str | None = None
+    titulo: str | None = None
+    ano: int | None = None
+    ano_proposta: int | None = None
+    descricao: str | None = None
+    bio: str | None = None
+    impacto: str | None = None
+    problema_resolvido: str | None = None
+    category: str
+    fontes: List[str] = []
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    rel_type: str
+    prop_motivo: str | None = None
+
+
+class GraphResponse(BaseModel):
+    uid: str
+    root_id: str
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+
+
 class TimelineEvent(BaseModel):
     uid: str
     ano: int | None = None
@@ -225,6 +255,14 @@ def _build_context_payload(candidates: List[Dict[str, Any]], lineage: List[str])
     return "\n".join(lines)
 
 
+def _node_category_from_labels(labels: List[str]) -> str:
+    priority = ("Pessoa", "Teoria", "Tecnologia", "Evento")
+    for label in priority:
+        if label in labels:
+            return label
+    return labels[0] if labels else "Entidade"
+
+
 def _ensure_graph_citations(answer: str, sources: List[str], lineage: List[str]) -> str:
     if not sources:
         return answer
@@ -365,6 +403,80 @@ async def search(request: SearchRequest) -> SearchResponse:
     answer = await _synthesize_answer(request.query, context_payload)
     answer = _ensure_graph_citations(answer, sources, lineage)
     return SearchResponse(answer=answer, sources=sources, lineage=lineage)
+
+
+@app.get("/graph/{uid}", response_model=GraphResponse)
+def graph(uid: str) -> GraphResponse:
+    root_query = """
+    MATCH (n)
+    WHERE n.uid = $uid OR n.nome = $uid OR n.titulo = $uid
+    RETURN elementId(n) AS id
+    ORDER BY CASE WHEN n:Evento THEN 0 ELSE 1 END
+    LIMIT 1
+    """
+    nodes_query = """
+    MATCH (root)
+    WHERE elementId(root) = $root_id
+    MATCH p=(root)-[:FEZ|INFLUENCIA|FUNDAMENTA|EVOLUI_PARA*0..4]-(n)
+    WITH DISTINCT n
+    RETURN elementId(n) AS id, labels(n) AS labels, n{.*} AS props
+    """
+    edges_query = """
+    MATCH (a)-[r:FEZ|INFLUENCIA|FUNDAMENTA|EVOLUI_PARA]-(b)
+    WHERE elementId(a) IN $node_ids AND elementId(b) IN $node_ids
+    RETURN DISTINCT elementId(r) AS id,
+           elementId(a) AS source,
+           elementId(b) AS target,
+           type(r) AS rel_type,
+           r.prop_motivo AS prop_motivo
+    """
+
+    with NEO4J_DRIVER.session(database=NEO4J_DATABASE) as session:
+        root_row = session.run(root_query, uid=uid).single()
+        if not root_row:
+            raise HTTPException(status_code=404, detail=f"Nenhum nó encontrado para uid '{uid}'.")
+        root_id = root_row["id"]
+
+        node_rows = session.run(nodes_query, root_id=root_id).data()
+        node_ids = [row["id"] for row in node_rows]
+        edge_rows = session.run(edges_query, node_ids=node_ids).data() if node_ids else []
+
+    nodes: List[GraphNode] = []
+    for row in node_rows:
+        labels = row.get("labels") or []
+        props = row.get("props") or {}
+        fontes = props.get("fontes") or props.get("sources") or []
+        if isinstance(fontes, str):
+            fontes = [fontes]
+        nodes.append(
+            GraphNode(
+                id=row["id"],
+                uid=props.get("uid"),
+                nome=props.get("nome"),
+                titulo=props.get("titulo"),
+                ano=props.get("ano"),
+                ano_proposta=props.get("ano_proposta"),
+                descricao=props.get("descricao"),
+                bio=props.get("bio"),
+                impacto=props.get("impacto"),
+                problema_resolvido=props.get("problema_resolvido"),
+                category=_node_category_from_labels(labels),
+                fontes=[str(item) for item in fontes if item],
+            )
+        )
+
+    edges = [
+        GraphEdge(
+            id=row["id"],
+            source=row["source"],
+            target=row["target"],
+            rel_type=row["rel_type"],
+            prop_motivo=row.get("prop_motivo"),
+        )
+        for row in edge_rows
+    ]
+
+    return GraphResponse(uid=uid, root_id=root_id, nodes=nodes, edges=edges)
 
 
 @app.get("/timeline", response_model=List[TimelineEvent])

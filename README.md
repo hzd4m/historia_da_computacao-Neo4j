@@ -54,3 +54,23 @@ bash scripts/fix_neo4j_permissions.sh
 ## Seguranca
 - `.env` e dados de runtime estao no `.gitignore`.
 - Se uma chave tiver vazado, revogue e gere nova em `https://ollama.com/settings/keys`.
+
+## Frontend de Grafo
+- Codigo React + Cytoscape em `frontend/`.
+- O dashboard consome:
+  - `POST /search`
+  - `GET /graph/{uid}`
+
+Executar:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Configurar base da API (opcional):
+```bash
+cp .env.example .env
+# em frontend/.env
+VITE_API_BASE_URL=http://localhost:8000
+```
