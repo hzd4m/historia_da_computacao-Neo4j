@@ -1,0 +1,6 @@
+neo4j>=5.0
+neo4j-graphrag>=0.1.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pandas>=2.2.0
+ollama>=0.1.0
