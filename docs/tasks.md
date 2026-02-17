@@ -119,3 +119,15 @@ Data: 17/02/2026
 - Comandos de validação de plugins: instruções adicionadas ✅
 
 *Próximo passo sugerido: rodar `docker compose up --build` localmente, aplicar `chown` nos volumes se necessário e validar os procedimentos com os comandos acima.*
+
+---
+
+### 7. Issue pronta para GitHub Projects: chamadas Ollama
+Data: 17/02/2026
+Descrição: Criado o documento `docs/github-projects/issue_chamar_ollama.md` com conteúdo completo para abrir card/issue no GitHub Projects, incluindo problema, objetivo, escopo, critérios de aceite, plano de implementação, riscos, dependências e evidências esperadas.
+
+---
+
+### 8. Planejamento para GitHub Projects #6 (grafo + interação)
+Data: 17/02/2026
+Descrição: Criado `docs/github-projects/projects6_planejamento_grafo_interacao.md` com roadmap em 3 fases, backlog inicial de cards, critérios de aceite, métricas e DoR para iniciar a etapa de LLM/GraphRAG.
