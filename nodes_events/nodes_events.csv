@@ -1,0 +1,4 @@
+uid,ano,titulo,descricao,fonte,tecnologia_base,potencia_kw
+"ev-001","1983","Início da Internet","Flag Day migrou a ARPANET de NCP para TCP IP.","https://www.internetsociety.org/internet/history-internet/brief-history-internet/","Protocolo TCP/IP","NULL"
+"ev-002","2017","Revolução da Atenção","O paper Attention Is All You Need lançou a base técnica dos LLMs.","https://arxiv.org/abs/1706.03762","Arquitetura Transformer","NULL"
+"ev-003","2022","Lançamento ChatGPT","A interface conversacional tornou IA generativa acessível em larga escala.","https://openai.com/index/chatgpt/","Modelos GPT","NULL"

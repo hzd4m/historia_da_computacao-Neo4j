@@ -1,0 +1,6 @@
+nome,ano_proposta,paper,problema_resolvido,impacto
+"Sistema Binário","1679","De Progressione Dyadica","Representar informação com zero e um","Base universal da computação digital."
+"Método de Diferenças Finitas","1687","Philosophiae Naturalis Principia Mathematica","Aproximar cálculo por variações discretas","Fundamentou automação numérica em máquinas."
+"Arquitetura de Rede Aberta","1972","Open Network Architecture","Interligar redes heterogêneas sem controle central único","Preparou a adoção ampla do TCP IP."
+"Mecanismo de Atenção","2017","Attention Is All You Need","Modelar dependências longas em sequências","Núcleo matemático da arquitetura Transformer."
+"Arquitetura Transformer","2017","Attention Is All You Need","Escalar treinamento paralelo em linguagem natural","Viabilizou LLMs e IA generativa moderna."
