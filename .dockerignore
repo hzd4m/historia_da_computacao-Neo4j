@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+neo4j_data/
+neo4j_logs/
+neo4j_import/
+neo4j_plugins/
+
+frontend/node_modules/
+frontend/dist/
