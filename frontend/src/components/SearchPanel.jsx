@@ -33,6 +33,8 @@ export default function SearchPanel() {
     }
   }
 
+  const timing = searchResult?.timing
+
   return (
     <section className="search-panel">
       <form className="search-form" onSubmit={onSubmit}>
@@ -64,8 +66,27 @@ export default function SearchPanel() {
         {error ? <p className="error-text">Erro: {error}</p> : null}
         {searchResult?.answer ? (
           <>
-            <h3>Resposta atual</h3>
-            <p>{searchResult.answer}</p>
+            <h3>Resposta</h3>
+            <p className="search-answer">{searchResult.answer}</p>
+            {searchResult.sources?.length > 0 && (
+              <div className="search-sources">
+                <strong>Fontes:</strong>
+                <ul>
+                  {searchResult.sources.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {timing && (
+              <p className="search-timing muted">
+                {timing.total_ms != null ? `Total: ${timing.total_ms}ms` : ''}
+                {timing.embedding_ms != null ? ` | Embedding: ${timing.embedding_ms}ms` : ''}
+                {timing.vector_search_ms != null ? ` | Vetorial: ${timing.vector_search_ms}ms` : ''}
+                {timing.lineage_ms != null ? ` | Linhagem: ${timing.lineage_ms}ms` : ''}
+                {timing.synthesis_ms != null ? ` | Síntese: ${timing.synthesis_ms}ms` : ''}
+              </p>
+            )}
           </>
         ) : (
           <p className="muted">Execute uma busca para destacar o caminho da resposta no grafo.</p>

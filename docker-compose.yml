@@ -12,15 +12,15 @@ services:
       # Permitir procedimentos não restritos do APOC.
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_dbms_security_procedures_allowlist=apoc.*
-      # Configurações de memória para evitar OOM (ajuste conforme host)
-      - NEO4J_dbms_memory_heap_max__size=4G
-      - NEO4J_dbms_memory_pagecache_size=2G
+      # Configurações de memória — ajuste conforme host via .env
+      - NEO4J_dbms_memory_heap_max__size=${NEO4J_HEAP_MAX:-2G}
+      - NEO4J_dbms_memory_pagecache_size=${NEO4J_PAGECACHE:-1G}
     ports:
       - "7687:7687" # Bolt
       - "7474:7474" # HTTP
     volumes:
-      - ./neo4j_data:/data
-      - ./neo4j_logs:/logs
+      - neo4j_data:/data
+      - neo4j_logs:/logs
       - ./neo4j_import:/import
       - ./neo4j_plugins:/plugins
     healthcheck:
@@ -28,13 +28,17 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+    networks:
+      - grafo
 
   app:
     build: .
     container_name: app
-    restart: on-failure
+    restart: on-failure:3
     environment:
-      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
@@ -43,12 +47,34 @@ services:
         condition: service_healthy
     volumes:
       - ./scripts:/app/scripts:ro
+      - ./nodes_persons:/app/nodes_persons:ro
+      - ./nodes_theories:/app/nodes_theories:ro
+      - ./nodes_techs:/app/nodes_techs:ro
+      - ./nodes_events:/app/nodes_events:ro
+      - ./relationships.csv:/app/relationships.csv:ro
     command: bash -c "python /app/scripts/ingest.py && uvicorn scripts.start_api:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 15s
+    networks:
+      - grafo
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+
+networks:
+  grafo:
+    driver: bridge
 
 # Observações:
-# - Os diretórios host ./neo4j_data, ./neo4j_logs, ./neo4j_import e ./neo4j_plugins
-#   são montados para persistência entre reinicializações.
-# - Ajuste NEO4J_dbms_memory_heap_max__size e NEO4J_dbms_memory_pagecache_size
-#   conforme a memória disponível no host. Valores acima são exemplos.
+# - Volumes nomeados (neo4j_data, neo4j_logs) evitam conflitos de permissão em hosts variados.
+# - Ajuste NEO4J_HEAP_MAX e NEO4J_PAGECACHE via .env conforme a memória disponível.
+# - O app reinicia no máximo 3 vezes antes de parar (on-failure:3).
+# - Healthchecks garantem que ambos os serviços estejam acessíveis antes de receber tráfego.

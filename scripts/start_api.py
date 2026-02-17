@@ -7,17 +7,16 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j import Driver, GraphDatabase
 from pydantic import BaseModel, Field
-
-from neo4j_graphrag.embeddings import OllamaEmbeddings
 
 
 logging.basicConfig(
@@ -29,7 +28,7 @@ logger = logging.getLogger("start-api")
 app = FastAPI(
     title="GraphRAG - História da Computação",
     description="API para busca híbrida e linhagem tecnológica no grafo.",
-    version="2.0",
+    version="3.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -51,14 +50,27 @@ LINEAGE_MAX_PATHS_PER_NODE = int(os.getenv("LINEAGE_MAX_PATHS_PER_NODE", "3"))
 
 OLLAMA_HEADERS = {"Authorization": "Bearer " + (OLLAMA_API_KEY or "")}
 
-# Camada vetorial usa similaridade de cosseno:
-# S_c(A, B) = (A · B) / (||A|| ||B||)
-EMBEDDER = OllamaEmbeddings(
-    model=OLLAMA_MODEL,
-    host=OLLAMA_HOST,
-    headers=OLLAMA_HEADERS,
-    timeout=OLLAMA_TIMEOUT,
-)
+_EMBEDDER = None
+
+
+def _get_embedder():
+    """Inicializa o embedder sob demanda para não bloquear startup sem chave."""
+    global _EMBEDDER
+    if _EMBEDDER is not None:
+        return _EMBEDDER
+    try:
+        from neo4j_graphrag.embeddings import OllamaEmbeddings
+        _EMBEDDER = OllamaEmbeddings(
+            model=OLLAMA_MODEL,
+            host=OLLAMA_HOST,
+            headers=OLLAMA_HEADERS,
+            timeout=OLLAMA_TIMEOUT,
+        )
+    except Exception as exc:
+        logger.warning("Falha ao inicializar embedder: %s", exc)
+        _EMBEDDER = None
+    return _EMBEDDER
+
 
 NEO4J_DRIVER: Driver = GraphDatabase.driver(
     NEO4J_URI,
@@ -87,14 +99,27 @@ if FRONTEND_DIST and (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
+# ---------------------------------------------------------------------------
+# Modelos Pydantic
+# ---------------------------------------------------------------------------
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=3, description="Pergunta do usuário")
+
+
+class SearchTiming(BaseModel):
+    embedding_ms: Optional[float] = None
+    vector_search_ms: Optional[float] = None
+    lineage_ms: Optional[float] = None
+    synthesis_ms: Optional[float] = None
+    total_ms: Optional[float] = None
 
 
 class SearchResponse(BaseModel):
     answer: str
     sources: List[str]
     lineage: List[str]
+    timing: Optional[SearchTiming] = None
 
 
 class GraphNode(BaseModel):
@@ -125,6 +150,10 @@ class GraphResponse(BaseModel):
     root_id: str
     nodes: List[GraphNode]
     edges: List[GraphEdge]
+    total_nodes: int
+    total_edges: int
+    page: int
+    page_size: int
 
 
 class TimelineEvent(BaseModel):
@@ -135,6 +164,18 @@ class TimelineEvent(BaseModel):
     tecnologia_base: str | None = None
     potencia_kw: float | None = None
 
+
+class HealthResponse(BaseModel):
+    status: str
+    neo4j: str
+    node_count: int | None = None
+    edge_count: int | None = None
+    embeddings_available: bool
+
+
+# ---------------------------------------------------------------------------
+# Funções auxiliares
+# ---------------------------------------------------------------------------
 
 def _node_display_name(node_map: Dict[str, Any]) -> str:
     return (
@@ -210,6 +251,40 @@ def _vector_search(embedding: List[float], top_k: int) -> List[Dict[str, Any]]:
 
     ranked = sorted(dedup.values(), key=lambda x: float(x["score"]), reverse=True)
     return ranked
+
+
+def _fulltext_fallback_search(query_text: str, top_k: int) -> List[Dict[str, Any]]:
+    """Busca por texto quando embeddings não estão disponíveis."""
+    cypher = """
+    MATCH (n)
+    WHERE n.nome IS NOT NULL OR n.titulo IS NOT NULL
+    WITH n, labels(n) AS labels,
+         CASE
+           WHEN toLower(coalesce(n.nome, '')) CONTAINS toLower($query) THEN 1.0
+           WHEN toLower(coalesce(n.titulo, '')) CONTAINS toLower($query) THEN 0.9
+           WHEN toLower(coalesce(n.descricao, '')) CONTAINS toLower($query) THEN 0.7
+           WHEN toLower(coalesce(n.impacto, '')) CONTAINS toLower($query) THEN 0.6
+           WHEN toLower(coalesce(n.bio, '')) CONTAINS toLower($query) THEN 0.5
+           ELSE 0.0
+         END AS score
+    WHERE score > 0
+    RETURN elementId(n) AS element_id,
+           labels(n) AS labels,
+           score,
+           n.nome AS nome,
+           n.titulo AS titulo,
+           n.uid AS uid,
+           n.ano AS ano,
+           n.ano_proposta AS ano_proposta,
+           n.descricao AS descricao,
+           n.impacto AS impacto,
+           n.problema_resolvido AS problema_resolvido,
+           n.tecnologia_base AS tecnologia_base
+    ORDER BY score DESC
+    LIMIT $top_k
+    """
+    with NEO4J_DRIVER.session(database=NEO4J_DATABASE) as session:
+        return session.run(cypher, query=query_text, top_k=top_k).data()
 
 
 def _extract_lineage(element_id: str) -> List[str]:
@@ -307,7 +382,7 @@ def _ensure_graph_citations(answer: str, sources: List[str], lineage: List[str])
 
 async def _synthesize_answer(query_text: str, context_payload: str) -> str:
     if not OLLAMA_API_KEY:
-        raise HTTPException(status_code=503, detail="OLLAMA_API_KEY não configurada.")
+        raise HTTPException(status_code=503, detail="OLLAMA_API_KEY não configurada para síntese LLM.")
 
     prompt = (
         "Você é um historiador da tecnologia e arquiteto de software. "
@@ -370,6 +445,32 @@ async def _synthesize_answer(query_text: str, context_payload: str) -> str:
     return str(content).strip()
 
 
+def _build_fallback_answer(candidates: List[Dict[str, Any]], lineage: List[str], query_text: str) -> str:
+    """Gera uma resposta estruturada sem LLM, baseada apenas nos dados do grafo."""
+    lines: List[str] = [
+        f"Resultados encontrados no grafo para: \"{query_text}\"",
+        "",
+    ]
+    for idx, node in enumerate(candidates, start=1):
+        name = _node_display_name(node)
+        year = _node_year(node)
+        desc = node.get("descricao") or node.get("impacto") or node.get("problema_resolvido") or "Sem descrição"
+        year_str = f" ({year})" if year else ""
+        lines.append(f"{idx}. **{name}{year_str}** — {desc}")
+
+    if lineage:
+        lines.append("")
+        lines.append("Linhagens identificadas:")
+        for chain in lineage[:6]:
+            lines.append(f"  - {chain}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
 @app.on_event("startup")
 def on_startup() -> None:
     try:
@@ -384,6 +485,10 @@ def on_shutdown() -> None:
     NEO4J_DRIVER.close()
 
 
+# ---------------------------------------------------------------------------
+# Rotas
+# ---------------------------------------------------------------------------
+
 @app.get("/")
 def root() -> Any:
     if FRONTEND_DIST:
@@ -392,59 +497,136 @@ def root() -> Any:
         "status": "ok",
         "service": "GraphRAG API",
         "docs": "/docs",
+        "healthz": "/healthz",
         "timeline": "/timeline",
         "example_graph": "/graph/Isaac Newton",
         "frontend_hint": "Build frontend e acesse /",
     }
 
 
+@app.get("/healthz", response_model=HealthResponse)
+def healthz() -> HealthResponse:
+    """Endpoint consolidado de saúde — verifica Neo4j e disponibilidade de embeddings."""
+    neo4j_status = "desconectado"
+    node_count = None
+    edge_count = None
+    try:
+        NEO4J_DRIVER.verify_connectivity()
+        neo4j_status = "conectado"
+        with NEO4J_DRIVER.session(database=NEO4J_DATABASE) as session:
+            row = session.run(
+                "MATCH (n) RETURN count(n) AS nodes"
+            ).single()
+            node_count = row["nodes"] if row else 0
+            row = session.run(
+                "MATCH ()-[r]->() RETURN count(r) AS edges"
+            ).single()
+            edge_count = row["edges"] if row else 0
+    except Exception as exc:
+        logger.warning("Healthcheck — falha ao verificar Neo4j: %s", exc)
+
+    embeddings_ok = bool(OLLAMA_API_KEY and _get_embedder() is not None)
+    overall = "ok" if neo4j_status == "conectado" else "degradado"
+
+    return HealthResponse(
+        status=overall,
+        neo4j=neo4j_status,
+        node_count=node_count,
+        edge_count=edge_count,
+        embeddings_available=embeddings_ok,
+    )
+
+
 @app.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
+    t_start = time.perf_counter()
     logger.info("Recebida query /search: %s", request.query)
 
-    if not OLLAMA_API_KEY:
-        raise HTTPException(status_code=503, detail="OLLAMA_API_KEY não configurada.")
+    timing = SearchTiming()
+    embedder = _get_embedder()
+    candidates: List[Dict[str, Any]] = []
 
-    try:
-        query_embedding = EMBEDDER.embed_query(request.query)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Falha ao gerar embedding da query via Ollama Cloud: {exc}",
-        ) from exc
+    # Etapa 1: embedding + busca vetorial (com fallback para fulltext)
+    if embedder and OLLAMA_API_KEY:
+        try:
+            t0 = time.perf_counter()
+            query_embedding = embedder.embed_query(request.query)
+            timing.embedding_ms = round((time.perf_counter() - t0) * 1000, 1)
 
-    candidates = _vector_search(query_embedding, SEARCH_TOP_K)
-    qualified = [item for item in candidates if float(item.get("score", 0.0)) >= SEARCH_SCORE_THRESHOLD]
+            t0 = time.perf_counter()
+            candidates = _vector_search(query_embedding, SEARCH_TOP_K)
+            timing.vector_search_ms = round((time.perf_counter() - t0) * 1000, 1)
 
-    if not qualified:
+            candidates = [item for item in candidates if float(item.get("score", 0.0)) >= SEARCH_SCORE_THRESHOLD]
+        except Exception as exc:
+            logger.warning("Falha na busca vetorial, usando fallback por texto: %s", exc)
+            candidates = []
+
+    if not candidates:
+        logger.info("Fallback: busca por texto para query '%s'", request.query)
+        candidates = _fulltext_fallback_search(request.query, SEARCH_TOP_K)
+
+    if not candidates:
+        timing.total_ms = round((time.perf_counter() - t_start) * 1000, 1)
         return SearchResponse(
             answer=(
                 "Não possuo contexto histórico suficiente para responder com precisão. "
-                "Nenhum nó com similaridade acima de 0.7 foi encontrado no grafo."
+                "Nenhum nó relevante foi encontrado no grafo."
             ),
             sources=[],
             lineage=[],
+            timing=timing,
         )
 
+    # Etapa 2: extração de linhagem
+    t0 = time.perf_counter()
     lineage: List[str] = []
-    for node in qualified:
+    for node in candidates:
         lineage.extend(_extract_lineage(node["element_id"]))
     lineage = list(dict.fromkeys(lineage))
+    timing.lineage_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     sources = list(
         dict.fromkeys(
-            [_format_node_with_year(node) for node in qualified]
+            [_format_node_with_year(node) for node in candidates]
         )
     )
 
-    context_payload = _build_context_payload(qualified, lineage)
-    answer = await _synthesize_answer(request.query, context_payload)
-    answer = _ensure_graph_citations(answer, sources, lineage)
-    return SearchResponse(answer=answer, sources=sources, lineage=lineage)
+    context_payload = _build_context_payload(candidates, lineage)
+
+    # Etapa 3: síntese via LLM (com fallback estruturado)
+    if OLLAMA_API_KEY:
+        try:
+            t0 = time.perf_counter()
+            answer = await _synthesize_answer(request.query, context_payload)
+            timing.synthesis_ms = round((time.perf_counter() - t0) * 1000, 1)
+            answer = _ensure_graph_citations(answer, sources, lineage)
+        except Exception as exc:
+            logger.warning("Falha na síntese LLM, retornando resposta estruturada: %s", exc)
+            answer = _build_fallback_answer(candidates, lineage, request.query)
+    else:
+        logger.info("OLLAMA_API_KEY ausente — retornando resposta estruturada sem LLM.")
+        answer = _build_fallback_answer(candidates, lineage, request.query)
+
+    timing.total_ms = round((time.perf_counter() - t_start) * 1000, 1)
+    logger.info(
+        "Busca concluída em %.1fms (embedding=%.1fms, vetorial=%.1fms, linhagem=%.1fms, síntese=%.1fms)",
+        timing.total_ms or 0,
+        timing.embedding_ms or 0,
+        timing.vector_search_ms or 0,
+        timing.lineage_ms or 0,
+        timing.synthesis_ms or 0,
+    )
+
+    return SearchResponse(answer=answer, sources=sources, lineage=lineage, timing=timing)
 
 
 @app.get("/graph/{uid}", response_model=GraphResponse)
-def graph(uid: str) -> GraphResponse:
+def graph(
+    uid: str,
+    page: int = Query(1, ge=1, description="Número da página (1-based)"),
+    page_size: int = Query(200, ge=1, le=1000, description="Nós por página"),
+) -> GraphResponse:
     root_query = """
     MATCH (n)
     WHERE n.uid = $uid OR n.nome = $uid OR n.titulo = $uid
@@ -475,8 +657,14 @@ def graph(uid: str) -> GraphResponse:
             raise HTTPException(status_code=404, detail=f"Nenhum nó encontrado para uid '{uid}'.")
         root_id = root_row["id"]
 
-        node_rows = session.run(nodes_query, root_id=root_id).data()
+        all_node_rows = session.run(nodes_query, root_id=root_id).data()
+        total_nodes = len(all_node_rows)
+
+        # Paginação de nós
+        start_idx = (page - 1) * page_size
+        node_rows = all_node_rows[start_idx : start_idx + page_size]
         node_ids = [row["id"] for row in node_rows]
+
         edge_rows = session.run(edges_query, node_ids=node_ids).data() if node_ids else []
 
     nodes: List[GraphNode] = []
@@ -514,7 +702,16 @@ def graph(uid: str) -> GraphResponse:
         for row in edge_rows
     ]
 
-    return GraphResponse(uid=uid, root_id=root_id, nodes=nodes, edges=edges)
+    return GraphResponse(
+        uid=uid,
+        root_id=root_id,
+        nodes=nodes,
+        edges=edges,
+        total_nodes=total_nodes,
+        total_edges=len(edges),
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.get("/timeline", response_model=List[TimelineEvent])

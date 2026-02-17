@@ -21,7 +21,18 @@ function normalizeNode(rawNode, idx) {
     name,
     year: rawNode.ano ?? rawNode.ano_proposta ?? rawNode.year ?? null,
     description: rawNode.descricao || rawNode.bio || rawNode.impacto || rawNode.problema_resolvido || 'Sem descrição disponível.',
-    sourceLinks: rawNode.fontes || rawNode.sources || []
+    sourceLinks: rawNode.fontes || rawNode.sources || [],
+    // Preservar propriedades brutas para o drawer
+    bio: rawNode.bio || null,
+    impacto: rawNode.impacto || null,
+    problema_resolvido: rawNode.problema_resolvido || null,
+    nacionalidade: rawNode.nacionalidade || null,
+    contribuicao_chave: rawNode.contribuicao_chave || null,
+    tipo: rawNode.tipo || null,
+    material: rawNode.material || null,
+    paper: rawNode.paper || null,
+    tecnologia_base: rawNode.tecnologia_base || null,
+    fonte: rawNode.fonte || null,
   }
 }
 
