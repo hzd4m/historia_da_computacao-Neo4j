@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from neo4j import Driver, GraphDatabase
 from pydantic import BaseModel, Field
 
@@ -61,6 +64,27 @@ NEO4J_DRIVER: Driver = GraphDatabase.driver(
     NEO4J_URI,
     auth=(NEO4J_USER, NEO4J_PASSWORD),
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_DIST_ENV = os.getenv("FRONTEND_DIST_DIR", "").strip()
+
+
+def _resolve_frontend_dist() -> Path | None:
+    candidates: List[Path] = []
+    if FRONTEND_DIST_ENV:
+        candidates.append(Path(FRONTEND_DIST_ENV))
+    candidates.append(PROJECT_ROOT / "frontend_dist")
+    candidates.append(PROJECT_ROOT / "frontend" / "dist")
+
+    for candidate in candidates:
+        if (candidate / "index.html").exists():
+            return candidate
+    return None
+
+
+FRONTEND_DIST = _resolve_frontend_dist()
+if FRONTEND_DIST and (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
 class SearchRequest(BaseModel):
@@ -360,6 +384,20 @@ def on_shutdown() -> None:
     NEO4J_DRIVER.close()
 
 
+@app.get("/")
+def root() -> Any:
+    if FRONTEND_DIST:
+        return FileResponse(FRONTEND_DIST / "index.html")
+    return {
+        "status": "ok",
+        "service": "GraphRAG API",
+        "docs": "/docs",
+        "timeline": "/timeline",
+        "example_graph": "/graph/Isaac Newton",
+        "frontend_hint": "Build frontend e acesse /",
+    }
+
+
 @app.post("/search", response_model=SearchResponse)
 async def search(request: SearchRequest) -> SearchResponse:
     logger.info("Recebida query /search: %s", request.query)
@@ -494,3 +532,15 @@ def timeline() -> List[TimelineEvent]:
     with NEO4J_DRIVER.session(database=NEO4J_DATABASE) as session:
         rows = session.run(query).data()
     return [TimelineEvent(**row) for row in rows]
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa_fallback(full_path: str) -> Any:
+    if not FRONTEND_DIST:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    candidate = FRONTEND_DIST / full_path
+    if full_path and candidate.exists() and candidate.is_file():
+        return FileResponse(candidate)
+
+    return FileResponse(FRONTEND_DIST / "index.html")
