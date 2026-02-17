@@ -1,5 +1,4 @@
-"""
-Ollama Cloud Bridge
+"""Ollama Cloud Bridge
 
 Proxy local para rotear modelos selecionados para o Ollama Cloud
 e manter modelos locais no Ollama local.
@@ -309,14 +308,14 @@ async def forward_local(path: str, payload: Dict[str, Any], stream: bool) -> Res
     for candidate_path in paths:
         url = build_url(OLLAMA_LOCAL_UPSTREAM, candidate_path)
         try:
-            if stream:
-                proxied, network_error, retry = await try_streaming_post(
-                    url=url,
-                    payload=payload,
-                    headers=headers,
-                    allow_model_not_found_retry=False,
-                    allow_404_retry=True,
-                )
+                if stream:
+                    proxied, network_error, retry = await try_streaming_post(
+                        url=url,
+                        payload=payload,
+                        headers=headers,
+                        allow_model_not_found_retry=False,
+                        allow_404_retry=True,
+                    )
                 if retry:
                     continue
                 if proxied is not None:
@@ -390,14 +389,14 @@ async def forward_remote(
         for candidate_path in paths:
             url = build_url(OLLAMA_REMOTE_URL, candidate_path)
             try:
-                if stream:
-                    proxied, network_error, retry = await try_streaming_post(
-                        url=url,
-                        payload=payload_with_model,
-                        headers=headers,
-                        allow_model_not_found_retry=True,
-                        allow_404_retry=True,
-                    )
+                    if stream:
+                        proxied, network_error, retry = await try_streaming_post(
+                            url=url,
+                            payload=payload_with_model,
+                            headers=headers,
+                            allow_model_not_found_retry=True,
+                            allow_404_retry=True,
+                        )
                     if retry:
                         if OLLAMA_BRIDGE_DEBUG:
                             logger.debug("Modelo '%s' não encontrado em %s (stream).", model, url)
@@ -422,10 +421,8 @@ async def forward_remote(
                         status_code=resp.status_code,
                         content={"error": "Autorização falhou ao acessar o endpoint remoto."},
                     )
-
                 if resp.status_code == 404 and candidate_path != paths[-1]:
                     continue
-
                 body_text = resp.text
                 if model_not_found_text(body_text):
                     if OLLAMA_BRIDGE_DEBUG:
