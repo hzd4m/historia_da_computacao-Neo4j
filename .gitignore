@@ -1,0 +1,25 @@
+# Neo4j runtime / data - não commitar
+neo4j_data/
+neo4j_logs/
+neo4j_import/
+neo4j_plugins/
+
+# Python
+__pycache__/
+*.pyc
+.env
+.env.*
+.venv/
+venv/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Build / packaging
+dist/
+build/
+
+# Misc
+*.log
