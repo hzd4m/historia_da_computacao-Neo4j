@@ -2,10 +2,12 @@
 ETL de marcos históricos da computação para Neo4j 5.
 
 O script realiza:
-1. Carga idempotente (MERGE) dos CSVs em nós e relacionamentos.
-2. Enriquecimento opcional com SimpleKGPipeline (neo4j-graphrag).
-3. Geração de embeddings para Evento e Teoria via Ollama Cloud.
-4. Criação de índices vetoriais para busca semântica.
+1. Validação de schema dos CSVs antes da carga.
+2. Carga idempotente (MERGE) dos CSVs em nós e relacionamentos.
+3. Criação de índices BTREE para consultas frequentes.
+4. Enriquecimento opcional com SimpleKGPipeline (neo4j-graphrag).
+5. Geração de embeddings para Evento e Teoria via Ollama Cloud.
+6. Criação de índices vetoriais para busca semântica.
 """
 
 from __future__ import annotations
@@ -14,15 +16,12 @@ import asyncio
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
 from neo4j import Driver, GraphDatabase
-
-from neo4j_graphrag.embeddings import OllamaEmbeddings
-from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
-from neo4j_graphrag.llm.ollama_llm import OllamaLLM
 
 
 logging.basicConfig(
@@ -48,6 +47,21 @@ OLLAMA_HEADERS = {"Authorization": "Bearer " + (OLLAMA_API_KEY or "")}
 
 REL_TYPE_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
+# ---------------------------------------------------------------------------
+# Schemas esperados para cada CSV
+# ---------------------------------------------------------------------------
+EXPECTED_SCHEMAS: Dict[str, set[str]] = {
+    "persons": {"nome"},
+    "theories": {"nome"},
+    "techs": {"nome"},
+    "events": {"uid", "titulo"},
+    "relationships": {"from_id", "to_id", "rel_type"},
+}
+
+
+# ---------------------------------------------------------------------------
+# Funções utilitárias
+# ---------------------------------------------------------------------------
 
 def parse_optional_int(value: Any) -> Optional[int]:
     if value is None:
@@ -90,6 +104,27 @@ def load_csv(candidates: list[str]) -> pd.DataFrame:
     return pd.read_csv(csv_path, dtype=str, keep_default_na=False).fillna("")
 
 
+def validate_csv_schema(df: pd.DataFrame, schema_key: str, file_hint: str) -> bool:
+    """Valida que o DataFrame possui as colunas obrigatórias do schema."""
+    required = EXPECTED_SCHEMAS.get(schema_key, set())
+    actual = set(df.columns)
+    missing = required - actual
+    if missing:
+        logger.error(
+            "Validação de schema FALHOU para '%s': colunas obrigatórias ausentes: %s (colunas presentes: %s)",
+            file_hint,
+            sorted(missing),
+            sorted(actual),
+        )
+        return False
+    logger.info("Validação de schema OK para '%s': %s", file_hint, sorted(actual))
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Conexão e operações Neo4j
+# ---------------------------------------------------------------------------
+
 def connect_neo4j() -> Driver:
     logger.info("Conectando ao Neo4j em %s (database=%s)", NEO4J_URI, NEO4J_DATABASE)
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -108,6 +143,30 @@ def merge_nodes(driver: Driver, label: str, rows: list[Dict[str, Any]], merge_ke
         session.run(query, rows=rows).consume()
 
 
+def create_btree_indexes(driver: Driver) -> None:
+    """Cria índices BTREE para campos de consulta frequente."""
+    indexes = [
+        "CREATE INDEX pessoa_nome_idx IF NOT EXISTS FOR (n:Pessoa) ON (n.nome)",
+        "CREATE INDEX teoria_nome_idx IF NOT EXISTS FOR (n:Teoria) ON (n.nome)",
+        "CREATE INDEX tecnologia_nome_idx IF NOT EXISTS FOR (n:Tecnologia) ON (n.nome)",
+        "CREATE INDEX evento_uid_idx IF NOT EXISTS FOR (n:Evento) ON (n.uid)",
+        "CREATE INDEX evento_ano_idx IF NOT EXISTS FOR (n:Evento) ON (n.ano)",
+        "CREATE INDEX entidade_nome_idx IF NOT EXISTS FOR (n:Entidade) ON (n.nome)",
+    ]
+    logger.info("Criando índices BTREE para consultas frequentes...")
+    with driver.session(database=NEO4J_DATABASE) as session:
+        for idx_query in indexes:
+            try:
+                session.run(idx_query).consume()
+            except Exception as exc:
+                logger.warning("Índice já existente ou falha ao criar: %s", exc)
+    logger.info("Índices BTREE garantidos com sucesso.")
+
+
+# ---------------------------------------------------------------------------
+# Carga de nós
+# ---------------------------------------------------------------------------
+
 def load_persons(driver: Driver, df: pd.DataFrame) -> None:
     rows: list[Dict[str, Any]] = []
     for _, row in df.iterrows():
@@ -122,6 +181,7 @@ def load_persons(driver: Driver, df: pd.DataFrame) -> None:
     rows = [item for item in rows if item["nome"]]
     logger.info("Carregando %d nós de Pessoa...", len(rows))
     merge_nodes(driver, "Pessoa", rows, "nome")
+    logger.info("Nós de Pessoa carregados com sucesso.")
 
 
 def load_theories(driver: Driver, df: pd.DataFrame) -> None:
@@ -139,6 +199,7 @@ def load_theories(driver: Driver, df: pd.DataFrame) -> None:
     rows = [item for item in rows if item["nome"]]
     logger.info("Carregando %d nós de Teoria...", len(rows))
     merge_nodes(driver, "Teoria", rows, "nome")
+    logger.info("Nós de Teoria carregados com sucesso.")
 
 
 def load_techs(driver: Driver, df: pd.DataFrame) -> None:
@@ -156,6 +217,7 @@ def load_techs(driver: Driver, df: pd.DataFrame) -> None:
     rows = [item for item in rows if item["nome"]]
     logger.info("Carregando %d nós de Tecnologia...", len(rows))
     merge_nodes(driver, "Tecnologia", rows, "nome")
+    logger.info("Nós de Tecnologia carregados com sucesso.")
 
 
 def load_events(driver: Driver, df: pd.DataFrame) -> None:
@@ -178,7 +240,12 @@ def load_events(driver: Driver, df: pd.DataFrame) -> None:
     rows = [item for item in rows if item["uid"]]
     logger.info("Carregando %d nós de Evento...", len(rows))
     merge_nodes(driver, "Evento", rows, "uid")
+    logger.info("Nós de Evento carregados com sucesso.")
 
+
+# ---------------------------------------------------------------------------
+# Relacionamentos
+# ---------------------------------------------------------------------------
 
 def ensure_named_node(driver: Driver, name: str) -> None:
     query = "MERGE (:Entidade {nome: $name})"
@@ -213,6 +280,8 @@ def merge_named_relationship(driver: Driver, from_id: str, to_id: str, rel_type:
 
 def load_relationships(driver: Driver, df: pd.DataFrame) -> None:
     logger.info("Carregando %d relacionamentos do CSV...", len(df))
+    loaded = 0
+    skipped = 0
     for _, row in df.iterrows():
         from_id = normalize_text(row.get("from_id"))
         to_id = normalize_text(row.get("to_id"))
@@ -221,8 +290,11 @@ def load_relationships(driver: Driver, df: pd.DataFrame) -> None:
 
         if not from_id or not to_id or not rel_type:
             logger.warning("Relacionamento inválido ignorado: %s", dict(row))
+            skipped += 1
             continue
         merge_named_relationship(driver, from_id, to_id, rel_type, motivo)
+        loaded += 1
+    logger.info("Relacionamentos: %d carregados, %d ignorados.", loaded, skipped)
 
 
 def load_priority_newton_babbage(driver: Driver) -> None:
@@ -237,7 +309,14 @@ def load_priority_newton_babbage(driver: Driver) -> None:
         session.run(query).consume()
 
 
-def init_ollama_components() -> tuple[Optional[OllamaEmbeddings], Optional[OllamaLLM], Optional[int]]:
+# ---------------------------------------------------------------------------
+# Ollama / Embeddings
+# ---------------------------------------------------------------------------
+
+def init_ollama_components():
+    from neo4j_graphrag.embeddings import OllamaEmbeddings
+    from neo4j_graphrag.llm.ollama_llm import OllamaLLM
+
     if not OLLAMA_API_KEY:
         logger.error("OLLAMA_API_KEY não definida no ambiente.")
         return None, None, None
@@ -272,11 +351,9 @@ def init_ollama_components() -> tuple[Optional[OllamaEmbeddings], Optional[Ollam
         return None, None, None
 
 
-async def run_simple_kg_pipeline(
-    driver: Driver,
-    llm: OllamaLLM,
-    embedder: OllamaEmbeddings,
-) -> None:
+async def run_simple_kg_pipeline(driver, llm, embedder) -> None:
+    from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
+
     logger.info("Executando SimpleKGPipeline para enriquecimento automático...")
     pipeline = SimpleKGPipeline(
         llm=llm,
@@ -301,9 +378,9 @@ async def run_simple_kg_pipeline(
     logger.info("SimpleKGPipeline finalizado com sucesso.")
 
 
-def generate_embeddings(driver: Driver, embedder: OllamaEmbeddings) -> None:
-    # A recuperação vetorial no RAG usará similaridade de cosseno:
-    # $S_c(A, B) = \frac{A \cdot B}{\|A\| \|B\|}$
+def generate_embeddings(driver, embedder) -> None:
+    from neo4j_graphrag.embeddings import OllamaEmbeddings
+
     logger.info("Gerando embeddings para nós Teoria...")
     with driver.session(database=NEO4J_DATABASE) as session:
         theories = session.run(
@@ -323,7 +400,7 @@ def generate_embeddings(driver: Driver, embedder: OllamaEmbeddings) -> None:
                     str(row.get("impacto") or ""),
                 ]
             )
-            logger.info("Gerando embeddings para Teoria '%s'...", nome)
+            logger.info("Gerando embedding para Teoria '%s'...", nome)
             try:
                 vector = embedder.embed_query(text)
                 session.run(
@@ -352,7 +429,7 @@ def generate_embeddings(driver: Driver, embedder: OllamaEmbeddings) -> None:
                     str(row.get("tecnologia_base") or ""),
                 ]
             )
-            logger.info("Gerando embeddings para Evento '%s'...", titulo or uid)
+            logger.info("Gerando embedding para Evento '%s'...", titulo or uid)
             try:
                 vector = embedder.embed_query(text)
                 session.run(
@@ -395,15 +472,35 @@ def create_vector_indexes(driver: Driver, emb_dim: Optional[int]) -> None:
     logger.info("Índices vetoriais garantidos com sucesso.")
 
 
-def main() -> None:
-    logger.info("Iniciando ETL histórico para Graph Data Computer...")
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
+def main() -> None:
+    logger.info("=== Iniciando ETL histórico para Graph Data Computer ===")
+
+    # 1. Leitura dos CSVs
     persons_df = load_csv(["nodes_persons/nodes_persons.csv", "nodes_persons.csv"])
     theories_df = load_csv(["nodes_theories/nodes_theories.csv", "nodes_theories.csv"])
     techs_df = load_csv(["nodes_techs/nodes_techs.csv", "nodes_techs.csv"])
     events_df = load_csv(["nodes_events/nodes_events.csv", "nodes_events.csv"])
     rels_df = load_csv(["relationships.csv"])
 
+    # 2. Validação de schemas
+    validations = [
+        validate_csv_schema(persons_df, "persons", "nodes_persons"),
+        validate_csv_schema(theories_df, "theories", "nodes_theories"),
+        validate_csv_schema(techs_df, "techs", "nodes_techs"),
+        validate_csv_schema(events_df, "events", "nodes_events"),
+        validate_csv_schema(rels_df, "relationships", "relationships"),
+    ]
+    if not all(validations):
+        logger.error("Ingestão bloqueada: um ou mais CSVs falharam na validação de schema.")
+        sys.exit(1)
+
+    logger.info("Todos os CSVs validados com sucesso. Iniciando carga no Neo4j...")
+
+    # 3. Conexão e carga
     driver = connect_neo4j()
     try:
         load_persons(driver, persons_df)
@@ -414,6 +511,10 @@ def main() -> None:
         load_priority_newton_babbage(driver)
         load_relationships(driver, rels_df)
 
+        # 4. Índices BTREE
+        create_btree_indexes(driver)
+
+        # 5. Embeddings e enriquecimento
         embedder, llm, emb_dim = init_ollama_components()
         if embedder and llm:
             try:
@@ -429,12 +530,13 @@ def main() -> None:
             )
             emb_dim = None
 
+        # 6. Índices vetoriais
         create_vector_indexes(driver, emb_dim)
     finally:
         driver.close()
         logger.info("Conexão Neo4j encerrada.")
 
-    logger.info("Ingestão concluída com sucesso.")
+    logger.info("=== Ingestão concluída com sucesso. ===")
 
 
 if __name__ == "__main__":

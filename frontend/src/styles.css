@@ -40,6 +40,10 @@ body {
   opacity: 0.85;
 }
 
+/* ------------------------------------------------------------------ */
+/* Search panel                                                        */
+/* ------------------------------------------------------------------ */
+
 .search-panel {
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -73,7 +77,8 @@ body {
 
 .search-form button,
 .graph-toolbar button,
-.drawer-close {
+.drawer-close,
+.timeline-toggle {
   border: none;
   border-radius: 10px;
   padding: 10px 14px;
@@ -81,6 +86,12 @@ body {
   background: #0f766e;
   color: #f8fafc;
   cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.search-form button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .search-meta {
@@ -89,8 +100,117 @@ body {
   border-radius: 12px;
   padding: 10px;
   overflow: auto;
-  max-height: 220px;
+  max-height: 260px;
 }
+
+.search-answer {
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.search-sources ul {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+
+.search-timing {
+  font-size: 0.78rem;
+  margin-top: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Timeline / Storyline                                                */
+/* ------------------------------------------------------------------ */
+
+.timeline-section {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+  padding: 14px;
+}
+
+.timeline-section.timeline-collapsed {
+  padding: 8px 14px;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.timeline-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.timeline-toggle {
+  padding: 6px 12px;
+  font-size: 0.8rem;
+}
+
+.timeline-track {
+  display: flex;
+  overflow-x: auto;
+  gap: 0;
+  padding: 8px 0;
+  align-items: stretch;
+}
+
+.timeline-event {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 140px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.timeline-event:hover {
+  border-color: #0f766e;
+  box-shadow: 0 4px 12px rgba(15, 118, 110, 0.18);
+}
+
+.timeline-year {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: #0f766e;
+}
+
+.timeline-title {
+  font-size: 0.82rem;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.timeline-tech {
+  font-size: 0.72rem;
+}
+
+.timeline-connector {
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  width: 18px;
+  height: 2px;
+  background: #94a3b8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Graph board                                                         */
+/* ------------------------------------------------------------------ */
 
 .graph-board {
   position: relative;
@@ -105,9 +225,39 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px;
+  padding: 10px 12px;
   border-bottom: 1px solid #e2e8f0;
   background: rgba(248, 250, 252, 0.92);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-group button {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  min-width: 36px;
+}
+
+.graph-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-left: 6px;
 }
 
 .graph-canvas {
@@ -115,11 +265,15 @@ body {
   height: min(72vh, 780px);
 }
 
+/* ------------------------------------------------------------------ */
+/* Node details drawer                                                 */
+/* ------------------------------------------------------------------ */
+
 .details-drawer {
   position: absolute;
   right: 10px;
   top: 68px;
-  width: min(34vw, 380px);
+  width: min(34vw, 400px);
   max-height: calc(100% - 78px);
   overflow: auto;
   background: rgba(15, 23, 42, 0.95);
@@ -130,13 +284,34 @@ body {
   z-index: 20;
 }
 
+.drawer-fields p {
+  margin: 6px 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.drawer-uid {
+  font-size: 0.75rem;
+  margin-top: 8px;
+}
+
+.drawer-sources {
+  margin-top: 10px;
+}
+
 .node-chip {
   display: inline-block;
-  background: rgba(148, 163, 184, 0.3);
   border-radius: 999px;
   padding: 4px 10px;
   font-size: 0.8rem;
+  font-weight: 600;
 }
+
+.node-chip-pessoa { background: rgba(118, 189, 249, 0.3); }
+.node-chip-teoria { background: rgba(143, 109, 232, 0.3); }
+.node-chip-tecnologia { background: rgba(92, 207, 132, 0.3); }
+.node-chip-evento { background: rgba(242, 204, 96, 0.3); }
+.node-chip-entidade { background: rgba(148, 163, 184, 0.3); }
 
 .source-list {
   padding-left: 18px;
@@ -146,6 +321,10 @@ body {
   color: #93c5fd;
 }
 
+/* ------------------------------------------------------------------ */
+/* Utilities                                                           */
+/* ------------------------------------------------------------------ */
+
 .error-text {
   color: #b91c1c;
   font-weight: 700;
@@ -154,6 +333,10 @@ body {
 .muted {
   color: #64748b;
 }
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
 
 @media (max-width: 960px) {
   .search-panel {
@@ -172,5 +355,17 @@ body {
 
   .graph-canvas {
     height: 66vh;
+  }
+
+  .graph-legend {
+    display: none;
+  }
+
+  .timeline-track {
+    gap: 0;
+  }
+
+  .timeline-event {
+    min-width: 120px;
   }
 }

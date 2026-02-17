@@ -20,6 +20,7 @@ function edgeClassFromType(relType) {
   if (normalized === 'INFLUENCIA') return 'edge-influencia'
   if (normalized === 'EVOLUI_PARA') return 'edge-evolui'
   if (normalized === 'FEZ') return 'edge-fez'
+  if (normalized === 'FUNDAMENTA') return 'edge-fundamenta'
   return 'edge-default'
 }
 
@@ -40,9 +41,6 @@ export default function GraphDashboard() {
       const stylePreset = CATEGORY_STYLE[node.category] || CATEGORY_STYLE.Entidade
       const classes = ['graph-node']
       if (names.has(node.name)) classes.push('answer-path-node')
-      if (String(node.name).includes('Mother of All Demos') || String(node.description || '').includes('Mãe de Todas as Demonstrações')) {
-        classes.push('engelbart-core')
-      }
       return {
         data: {
           id: node.id,
@@ -93,8 +91,8 @@ export default function GraphDashboard() {
         animate: true
       },
       wheelSensitivity: 0.2,
-      minZoom: 0.25,
-      maxZoom: 2.4,
+      minZoom: 0.15,
+      maxZoom: 3.0,
       textureOnViewport: true,
       motionBlur: true,
       hideEdgesOnViewport: false,
@@ -114,7 +112,17 @@ export default function GraphDashboard() {
             width: 62,
             height: 62,
             'border-width': 2,
-            'border-color': '#1f2937'
+            'border-color': '#1f2937',
+            'transition-property': 'border-width, border-color, background-color',
+            'transition-duration': '0.15s'
+          }
+        },
+        {
+          selector: 'node:selected',
+          style: {
+            'border-width': 4,
+            'border-color': '#2563eb',
+            'background-color': '#dbeafe'
           }
         },
         {
@@ -128,11 +136,17 @@ export default function GraphDashboard() {
           }
         },
         {
-          selector: 'node.engelbart-core',
+          selector: 'node.neighbor-highlight',
           style: {
-            'background-color': '#f59e0b',
-            'border-width': 6,
-            'border-color': '#7c2d12'
+            'border-width': 3,
+            'border-color': '#6366f1',
+            opacity: 1
+          }
+        },
+        {
+          selector: 'node.dimmed',
+          style: {
+            opacity: 0.25
           }
         },
         {
@@ -149,7 +163,15 @@ export default function GraphDashboard() {
             'text-background-padding': 2,
             'target-arrow-color': '#64748b',
             'line-color': '#64748b',
-            color: '#334155'
+            color: '#334155',
+            'transition-property': 'opacity, line-color',
+            'transition-duration': '0.15s'
+          }
+        },
+        {
+          selector: 'edge.dimmed',
+          style: {
+            opacity: 0.12
           }
         },
         {
@@ -179,6 +201,16 @@ export default function GraphDashboard() {
             'line-color': '#64748b',
             'target-arrow-color': '#64748b'
           }
+        },
+        {
+          selector: 'edge.edge-fundamenta',
+          style: {
+            width: 3,
+            'line-style': 'dotted',
+            'line-color': '#8b5cf6',
+            'target-arrow-color': '#8b5cf6',
+            'arrow-scale': 1.2
+          }
         }
       ]
     })
@@ -186,6 +218,19 @@ export default function GraphDashboard() {
     cy.on('tap', 'node', (event) => {
       const node = event.target.data('node')
       setSelectedNode(node)
+
+      // Highlight neighbors
+      cy.elements().removeClass('neighbor-highlight dimmed')
+      const tapped = event.target
+      const neighborhood = tapped.neighborhood().add(tapped)
+      cy.elements().not(neighborhood).addClass('dimmed')
+      neighborhood.nodes().addClass('neighbor-highlight')
+    })
+
+    cy.on('tap', (event) => {
+      if (event.target === cy) {
+        cy.elements().removeClass('neighbor-highlight dimmed')
+      }
     })
 
     cyRef.current = cy
@@ -194,21 +239,67 @@ export default function GraphDashboard() {
     }
   }, [elements, setSelectedNode])
 
-  const onResetView = () => {
+  const onZoomIn = () => {
+    if (!cyRef.current) return
+    cyRef.current.zoom({ level: cyRef.current.zoom() * 1.3, renderedPosition: { x: containerRef.current.clientWidth / 2, y: containerRef.current.clientHeight / 2 } })
+  }
+
+  const onZoomOut = () => {
+    if (!cyRef.current) return
+    cyRef.current.zoom({ level: cyRef.current.zoom() / 1.3, renderedPosition: { x: containerRef.current.clientWidth / 2, y: containerRef.current.clientHeight / 2 } })
+  }
+
+  const onFit = () => {
     if (!cyRef.current) return
     cyRef.current.fit(undefined, 32)
+  }
+
+  const onResetView = () => {
+    if (!cyRef.current) return
+    cyRef.current.elements().removeClass('neighbor-highlight dimmed')
+    cyRef.current.fit(undefined, 32)
     cyRef.current.center()
-    cyRef.current.zoom(1)
+    setSelectedNode(null)
+  }
+
+  const onCenterSelected = () => {
+    if (!cyRef.current || !selectedNode) return
+    const sel = cyRef.current.getElementById(selectedNode.id)
+    if (sel.length) {
+      cyRef.current.animate({
+        center: { eles: sel },
+        zoom: 1.6,
+        duration: 300
+      })
+    }
   }
 
   return (
     <section className="graph-board">
       <div className="graph-toolbar">
-        <button onClick={onResetView}>Resetar visão</button>
-        <span className="muted">Zoom, pan e seleção ativos</span>
+        <div className="toolbar-group">
+          <button onClick={onZoomIn} title="Zoom in">+</button>
+          <button onClick={onZoomOut} title="Zoom out">&minus;</button>
+          <button onClick={onFit} title="Ajustar ao conteúdo">Ajustar</button>
+          <button onClick={onResetView} title="Resetar visão">Resetar</button>
+          {selectedNode && (
+            <button onClick={onCenterSelected} title="Centralizar seleção">Centralizar</button>
+          )}
+        </div>
+        <div className="toolbar-group">
+          <span className="graph-legend">
+            <span className="legend-dot" style={{ background: '#76bdf9' }} /> Pessoa
+            <span className="legend-dot" style={{ background: '#8f6de8' }} /> Teoria
+            <span className="legend-dot" style={{ background: '#5ccf84' }} /> Tecnologia
+            <span className="legend-dot" style={{ background: '#f2cc60' }} /> Evento
+          </span>
+        </div>
       </div>
       <div className="graph-canvas" ref={containerRef} />
-      <NodeDetailsDrawer node={selectedNode} onClose={() => setSelectedNode(null)} />
+      <NodeDetailsDrawer node={selectedNode} onClose={() => {
+        setSelectedNode(null)
+        if (cyRef.current) cyRef.current.elements().removeClass('neighbor-highlight dimmed')
+      }} />
     </section>
   )
 }

@@ -39,4 +39,12 @@ export async function fetchGraph(uid) {
   return request(`/graph/${encodeURIComponent(uid)}`)
 }
 
+export async function fetchTimeline() {
+  return request('/timeline')
+}
+
+export async function fetchHealthz() {
+  return request('/healthz')
+}
+
 export { API_BASE_URL }

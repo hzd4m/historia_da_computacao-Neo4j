@@ -1,5 +1,6 @@
 import GraphDashboard from './components/GraphDashboard'
 import SearchPanel from './components/SearchPanel'
+import TimelineStoryline from './components/TimelineStoryline'
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         </div>
       </header>
       <SearchPanel />
+      <TimelineStoryline />
       <GraphDashboard />
     </div>
   )
