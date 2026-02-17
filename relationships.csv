@@ -1,0 +1,7 @@
+from_id,to_id,rel_type,prop_motivo
+"Gottfried Leibniz","Sistema Binário","FEZ","Formalizou a lógica binária em documento técnico."
+"Isaac Newton","Método de Diferenças Finitas","FEZ","Introduziu método numérico no Principia Mathematica."
+"Método de Diferenças Finitas","Charles Babbage","INFLUENCIA","Base matemática para automação"
+"Sistema Binário","Alan Turing","INFLUENCIA","Lógica fundamental para computabilidade"
+"Vinton Cerf","Protocolo TCP/IP","FEZ","Coautoria da arquitetura de internetworking."
+"Arquitetura Transformer","ChatGPT","FUNDAMENTA","Arquitetura neural que habilitou modelos conversacionais."

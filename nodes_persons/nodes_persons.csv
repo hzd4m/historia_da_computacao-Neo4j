@@ -1,0 +1,8 @@
+nome,nacionalidade,contribuicao_chave,bio
+"Gottfried Leibniz","Alemão","Lógica binária","Documentou o sistema binário e conectou lógica simbólica ao cálculo mecânico."
+"Isaac Newton","Inglês","Método de diferenças finitas","Introduziu métodos numéricos no Principia Mathematica que viabilizaram tabelas automatizáveis."
+"Vinton Cerf","Americano","Arquitetura TCP/IP","Coautor da arquitetura de rede aberta e líder da transição para TCP IP."
+"Bob Kahn","Americano","Arquitetura TCP/IP","Coautor do desenho de internetworking que integrou redes distintas."
+"Ashish Vaswani et al.","Equipe internacional","Arquitetura Transformer","Autorias do paper Attention Is All You Need que inaugurou LLMs modernos."
+"Charles Babbage","Inglês","Difference Engine","Aplicou base matemática de diferenças finitas para automação de tabelas."
+"Alan Turing","Britânico","Computabilidade","Consolidou a lógica binária como fundamento formal da computação."
