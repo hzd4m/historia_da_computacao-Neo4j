@@ -68,12 +68,18 @@ function extractHighlightedNames(payload) {
 
 export function GraphProvider({ children }) {
   const [graph, setGraph] = useState({ nodes: [], edges: [] })
+  const [filteredGraph, setFilteredGraph] = useState({ nodes: [], edges: [] })
   const [selectedNode, setSelectedNode] = useState(null)
   const [searchResult, setSearchResult] = useState(null)
   const [highlightNames, setHighlightNames] = useState(new Set())
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [loadingSearch, setLoadingSearch] = useState(false)
   const [error, setError] = useState('')
+  const [filters, setFilters] = useState({
+    categories: [],
+    yearRange: { min: null, max: null },
+    region: ''
+  })
 
   const runSearch = useCallback(async (query) => {
     setLoadingSearch(true)
@@ -100,10 +106,12 @@ export function GraphProvider({ children }) {
       const payload = await fetchGraph(uid)
       const rawNodes = Array.isArray(payload.nodes) ? payload.nodes : []
       const rawEdges = Array.isArray(payload.edges) ? payload.edges : []
-      setGraph({
+      const normalizedGraph = {
         nodes: rawNodes.map(normalizeNode),
         edges: rawEdges.map(normalizeEdge)
-      })
+      }
+      setGraph(normalizedGraph)
+      setFilteredGraph(normalizedGraph)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
@@ -113,9 +121,49 @@ export function GraphProvider({ children }) {
     }
   }, [])
 
+  const applyFilters = useCallback((newFilters) => {
+    setFilters(newFilters)
+    
+    // Aplicar filtros ao grafo
+    const filteredNodes = graph.nodes.filter(node => {
+      // Filtro por categoria
+      if (newFilters.categories.length > 0 && !newFilters.categories.includes(node.category)) {
+        return false
+      }
+      
+      // Filtro por ano
+      if (newFilters.yearRange.min !== null && node.year && node.year < newFilters.yearRange.min) {
+        return false
+      }
+      
+      if (newFilters.yearRange.max !== null && node.year && node.year > newFilters.yearRange.max) {
+        return false
+      }
+      
+      // Filtro por região (se disponível)
+      if (newFilters.region && node.nacionalidade && !node.nacionalidade.toLowerCase().includes(newFilters.region.toLowerCase())) {
+        return false
+      }
+      
+      return true
+    })
+    
+    // Filtrar arestas que conectam nós filtrados
+    const nodeIds = new Set(filteredNodes.map(node => node.id))
+    const filteredEdges = graph.edges.filter(edge => 
+      nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    )
+    
+    setFilteredGraph({
+      nodes: filteredNodes,
+      edges: filteredEdges
+    })
+  }, [graph])
+
   const value = useMemo(
     () => ({
-      graph,
+      graph: filteredGraph,
+      originalGraph: graph,
       selectedNode,
       setSelectedNode,
       searchResult,
@@ -125,10 +173,13 @@ export function GraphProvider({ children }) {
       loadingGraph,
       loadingSearch,
       error,
-      setError
+      setError,
+      filters,
+      applyFilters
     }),
     [
       error,
+      filteredGraph,
       graph,
       highlightNames,
       loadGraph,
@@ -136,7 +187,9 @@ export function GraphProvider({ children }) {
       loadingSearch,
       runSearch,
       searchResult,
-      selectedNode
+      selectedNode,
+      filters,
+      applyFilters
     ]
   )
 

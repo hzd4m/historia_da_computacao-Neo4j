@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import cytoscape from 'cytoscape'
 import dagre from 'cytoscape-dagre'
+import { toPng, toSvg } from 'html-to-image'
 
 import { useGraphContext } from '../state/GraphContext'
 import NodeDetailsDrawer from './NodeDetailsDrawer'
@@ -227,6 +228,13 @@ export default function GraphDashboard() {
       neighborhood.nodes().addClass('neighbor-highlight')
     })
 
+    // Double tap para adicionar à comparação
+    cy.on('dbltap', 'node', (event) => {
+      const node = event.target.data('node')
+      // Aqui poderíamos emitir um evento ou chamar uma função para adicionar à comparação
+      console.log('Nó adicionado para comparação:', node.name)
+    })
+
     cy.on('tap', (event) => {
       if (event.target === cy) {
         cy.elements().removeClass('neighbor-highlight dimmed')
@@ -262,6 +270,32 @@ export default function GraphDashboard() {
     setSelectedNode(null)
   }
 
+  const onExportPNG = async () => {
+    if (!containerRef.current) return
+    try {
+      const dataUrl = await toPng(containerRef.current, { quality: 0.95 })
+      const link = document.createElement('a')
+      link.download = 'grafo-computacao.png'
+      link.href = dataUrl
+      link.click()
+    } catch (error) {
+      console.error('Erro ao exportar PNG:', error)
+    }
+  }
+
+  const onExportSVG = async () => {
+    if (!containerRef.current) return
+    try {
+      const dataUrl = await toSvg(containerRef.current, { quality: 0.95 })
+      const link = document.createElement('a')
+      link.download = 'grafo-computacao.svg'
+      link.href = dataUrl
+      link.click()
+    } catch (error) {
+      console.error('Erro ao exportar SVG:', error)
+    }
+  }
+
   const onCenterSelected = () => {
     if (!cyRef.current || !selectedNode) return
     const sel = cyRef.current.getElementById(selectedNode.id)
@@ -285,6 +319,8 @@ export default function GraphDashboard() {
           {selectedNode && (
             <button onClick={onCenterSelected} title="Centralizar seleção">Centralizar</button>
           )}
+          <button onClick={onExportPNG} title="Exportar como PNG">PNG</button>
+          <button onClick={onExportSVG} title="Exportar como SVG">SVG</button>
         </div>
         <div className="toolbar-group">
           <span className="graph-legend">
