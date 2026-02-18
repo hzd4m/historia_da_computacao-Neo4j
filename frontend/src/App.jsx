@@ -5,6 +5,7 @@ import Tooltip from './components/Tooltip'
 import AdvancedFilters from './components/AdvancedFilters'
 import LineageComparison from './components/LineageComparison'
 import Notifications from './components/Notifications'
+import DataVisualizationDashboard from './components/DataVisualizationDashboard'
 import { useEffect, useState } from 'react'
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
       <AdvancedFilters />
       <LineageComparison />
       <GraphDashboard />
+      <DataVisualizationDashboard />
       <Notifications />
     </div>
   )
